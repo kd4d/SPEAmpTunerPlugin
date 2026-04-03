@@ -334,8 +334,11 @@ namespace SPEAmpTunerPlugin.MyModel
             bool hadAmpChange = update.AmpStateChanged || update.PttStateChanged || update.PttReady;
             bool hadTunerChange = update.TunerStateChanged || update.TuningStateChanged || update.TunerRelaysChanged;
             bool hadDeviceDataChange = update.AmpStateChanged || update.TunerStateChanged
-                || update.FaultCode.HasValue || update.BandNumber.HasValue || update.Antenna.HasValue
-                || update.Input.HasValue || update.PowerLevel != null;
+                || (update.FaultCode.HasValue && update.FaultCode.Value != _statusTracker.FaultCode)
+                || (update.BandNumber.HasValue && update.BandNumber.Value != _statusTracker.BandNumber)
+                || (update.Antenna.HasValue && update.Antenna.Value != _statusTracker.Antenna)
+                || (update.Input.HasValue && update.Input.Value != _statusTracker.Input)
+                || (update.PowerLevel != null && update.PowerLevel != _statusTracker.PowerLevel);
 
             _statusTracker.ApplyUpdate(update);
 
@@ -406,7 +409,10 @@ namespace SPEAmpTunerPlugin.MyModel
             return true;
         }
 
-        // Use PgTg.Web.* fully qualified — newer bridges also expose the same names under PgTg.Common (CS0104 if imported).
+        /// <summary>
+        /// Uses <c>PgTg.Web</c> types (see <c>PgTgDeviceControlStubs.cs</c> when building without full PgTgBridge Web types).
+        /// If your installed bridge expects <c>PgTg.Common</c> only, change this method’s return/element types to match <c>IDevicePlugin</c>.
+        /// </summary>
         public PgTg.Web.DeviceControlDefinition? GetDeviceControlDefinition()
         {
             return new PgTg.Web.DeviceControlDefinition

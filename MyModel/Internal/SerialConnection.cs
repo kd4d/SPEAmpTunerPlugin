@@ -111,15 +111,21 @@ namespace SPEAmpTunerPlugin.MyModel.Internal
         public bool Send(string data)
         {
             var frames = SpeBinaryCommandEncoder.EncodeAll(data);
-            if (frames.Count == 0)
+            if (frames.Count > 0)
+            {
+                foreach (byte[] frame in frames)
+                {
+                    if (!Send(frame))
+                        return false;
+                }
+                return true;
+            }
+
+            if (SpeBinaryCommandEncoder.IsNoOpOrFrqOnly(data))
                 return true;
 
-            foreach (byte[] frame in frames)
-            {
-                if (!Send(frame))
-                    return false;
-            }
-            return true;
+            Logger.LogVerbose(ModuleName, "No SPE binary mapping for device command (nothing sent)");
+            return false;
         }
 
         private async Task ConnectAndListenAsync()

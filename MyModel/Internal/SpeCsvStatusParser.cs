@@ -56,6 +56,29 @@ namespace SPEAmpTunerPlugin.MyModel.Internal
             result.WarningCode = fields.Length > 18 ? F(fields, 18) : "";
             result.ErrorCode = fields.Length > 19 ? F(fields, 19) : "";
 
+            // Typical emulator layout (leading empty fields): index 7 often holds antenna 1–4; index 4 input 1–2.
+            if (fields.Length > 7)
+            {
+                string a = F(fields, 7);
+                if (a.Length == 1 && a[0] >= '1' && a[0] <= '4')
+                    result.Antenna = a[0] - '0';
+            }
+            if (fields.Length > 4)
+            {
+                string inp = F(fields, 4);
+                if (inp == "1" || inp == "2")
+                    result.Input = int.Parse(inp, CultureInfo.InvariantCulture);
+            }
+            foreach (string raw in fields)
+            {
+                string t = raw.Trim();
+                if (t.Length == 1 && (t[0] == 'L' || t[0] == 'M' || t[0] == 'H' || t[0] == 'l' || t[0] == 'm' || t[0] == 'h'))
+                {
+                    result.PowerLevel = t.ToUpperInvariant();
+                    break;
+                }
+            }
+
             result.IsValid = true;
             return true;
         }
@@ -95,5 +118,8 @@ namespace SPEAmpTunerPlugin.MyModel.Internal
         public int BandNumber { get; set; }
         public string WarningCode { get; set; } = "";
         public string ErrorCode { get; set; } = "";
+        public int? Antenna { get; set; }
+        public int? Input { get; set; }
+        public string? PowerLevel { get; set; }
     }
 }

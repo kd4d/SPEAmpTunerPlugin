@@ -29,6 +29,13 @@ namespace SPEAmpTunerPlugin.MyModel.Internal
 
             u.FaultCode = DeriveFaultCode(csv.WarningCode, csv.ErrorCode);
 
+            if (csv.Antenna.HasValue)
+                u.Antenna = csv.Antenna.Value;
+            if (csv.Input.HasValue)
+                u.Input = csv.Input.Value;
+            if (csv.PowerLevel != null)
+                u.PowerLevel = csv.PowerLevel;
+
             return u;
         }
 

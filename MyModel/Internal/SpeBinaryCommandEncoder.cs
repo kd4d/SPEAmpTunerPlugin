@@ -28,6 +28,26 @@ namespace SPEAmpTunerPlugin.MyModel.Internal
             return list;
         }
 
+        /// <summary>True if the string has no $ segments, only $FRQ…; segments, or is empty (intentional no-op).</summary>
+        public static bool IsNoOpOrFrqOnly(string? data)
+        {
+            if (string.IsNullOrWhiteSpace(data)) return true;
+            MatchCollection matches = SegmentPattern.Matches(data);
+            if (matches.Count == 0) return true;
+            foreach (Match m in matches)
+            {
+                string s = m.Value.Trim();
+                if (!s.StartsWith("$", StringComparison.Ordinal)) continue;
+                if (!s.EndsWith(";", StringComparison.Ordinal)) s += ";";
+                string inner = s.Substring(1, s.Length - 2).Trim();
+                int sp = inner.IndexOf(' ', StringComparison.Ordinal);
+                string key = sp >= 0 ? inner.Substring(0, sp).Trim().ToUpperInvariant() : inner.ToUpperInvariant();
+                if (!key.StartsWith("FRQ", StringComparison.Ordinal))
+                    return false;
+            }
+            return true;
+        }
+
         private static byte[]? EncodeOneSegment(string segment)
         {
             string s = segment.Trim();
@@ -38,6 +58,10 @@ namespace SPEAmpTunerPlugin.MyModel.Internal
             int sp = inner.IndexOf(' ', StringComparison.Ordinal);
             string key = sp >= 0 ? inner.Substring(0, sp).Trim().ToUpperInvariant() : inner.ToUpperInvariant();
             string arg = sp >= 0 ? inner.Substring(sp + 1).Trim() : string.Empty;
+
+            // ATU inline/bypass — both map to TUNE key (SPE has no separate AI0/AI1 in 6-byte table; tune toggles ATU path).
+            if (key is "AI0" or "AI1")
+                return SpeProtocol.CmdTune;
 
             if (key.StartsWith("FRQ", StringComparison.Ordinal))
                 return null;
