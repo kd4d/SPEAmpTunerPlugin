@@ -1,0 +1,47 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="SPEAmpTunerEmulator" />
+  </ItemGroup>
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <AssemblyVersion>1.0.0.0</AssemblyVersion>
+    <FileVersion>1.0.0.0</FileVersion>
+    <RootNamespace>SPEAmpTunerPlugin</RootNamespace>
+  </PropertyGroup>
+
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|AnyCPU'">
+    <NoWarn>1701;1702;CA1416</NoWarn>
+  </PropertyGroup>
+
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|AnyCPU'">
+    <NoWarn>1701;1702;CA1416</NoWarn>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="System.IO.Ports" Version="10.0.1" />
+  </ItemGroup>
+
+  <ItemGroup Condition="Exists('..\PgTgSamplePlugins\PgTgEmulator\PgTg\PgTg.csproj')">
+    <ProjectReference Include="..\PgTgSamplePlugins\PgTgEmulator\PgTg\PgTg.csproj">
+      <Private>false</Private>
+      <ExcludeAssets>runtime</ExcludeAssets>
+    </ProjectReference>
+  </ItemGroup>
+
+  <ItemGroup Condition="!Exists('..\PgTgSamplePlugins\PgTgEmulator\PgTg\PgTg.csproj')">
+    <Reference Include="PgTg">
+      <HintPath>C:\Program Files\PgTgBridge\bin\PgTg.dll</HintPath>
+    </Reference>
+    <Reference Include="PgTg.Common">
+      <HintPath>C:\Program Files\PgTgBridge\bin\PgTg.Common.dll</HintPath>
+    </Reference>
+    <Reference Include="PgTg.Helpers">
+      <HintPath>C:\Program Files\PgTgBridge\bin\PgTg.Helpers.dll</HintPath>
+    </Reference>
+  </ItemGroup>
+
+</Project>
