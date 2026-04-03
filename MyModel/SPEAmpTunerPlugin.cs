@@ -8,7 +8,6 @@ using PgTg.AMP;
 using PgTg.Common;
 using PgTg.Plugins;
 using PgTg.Plugins.Core;
-using PgTg.Web;
 using SPEAmpTunerPlugin.MyModel.Internal;
 
 namespace SPEAmpTunerPlugin.MyModel
@@ -388,13 +387,14 @@ namespace SPEAmpTunerPlugin.MyModel
             return true;
         }
 
-        public DeviceControlDefinition? GetDeviceControlDefinition()
+        // Use PgTg.Web.* fully qualified — newer bridges also expose the same names under PgTg.Common (CS0104 if imported).
+        public PgTg.Web.DeviceControlDefinition? GetDeviceControlDefinition()
         {
-            return new DeviceControlDefinition
+            return new PgTg.Web.DeviceControlDefinition
             {
-                Elements = new List<DeviceControlElement>
+                Elements = new List<PgTg.Web.DeviceControlElement>
                 {
-                    new DeviceControlElement
+                    new PgTg.Web.DeviceControlElement
                     {
                         ActiveColor = "green",
                         InactiveColor = "gray",
@@ -407,7 +407,7 @@ namespace SPEAmpTunerPlugin.MyModel
                         IsClickable = true,
                         IsPowerIndicator = true
                     },
-                    new DeviceControlElement
+                    new PgTg.Web.DeviceControlElement
                     {
                         ActiveColor = "green",
                         InactiveColor = "yellow",
@@ -419,7 +419,7 @@ namespace SPEAmpTunerPlugin.MyModel
                         ActiveValue = "1",
                         IsClickable = true
                     },
-                    new DeviceControlElement
+                    new PgTg.Web.DeviceControlElement
                     {
                         ActiveColor = "green",
                         InactiveColor = "gray",
@@ -431,7 +431,7 @@ namespace SPEAmpTunerPlugin.MyModel
                         ActiveValue = "1",
                         IsClickable = true
                     },
-                    new DeviceControlElement
+                    new PgTg.Web.DeviceControlElement
                     {
                         ActiveColor = "green",
                         InactiveColor = "gray",
@@ -443,7 +443,7 @@ namespace SPEAmpTunerPlugin.MyModel
                         ActiveValue = "2",
                         IsClickable = true
                     },
-                    new DeviceControlElement
+                    new PgTg.Web.DeviceControlElement
                     {
                         ActiveColor = "green",
                         InactiveColor = "gray",
@@ -455,7 +455,7 @@ namespace SPEAmpTunerPlugin.MyModel
                         ActiveValue = "3",
                         IsClickable = true
                     },
-                    new DeviceControlElement
+                    new PgTg.Web.DeviceControlElement
                     {
                         ActiveColor = "green",
                         InactiveColor = "gray",
@@ -467,7 +467,7 @@ namespace SPEAmpTunerPlugin.MyModel
                         ActiveValue = "4",
                         IsClickable = true
                     },
-                    new DeviceControlElement
+                    new PgTg.Web.DeviceControlElement
                     {
                         ActiveColor = "green",
                         InactiveColor = "gray",
@@ -479,7 +479,7 @@ namespace SPEAmpTunerPlugin.MyModel
                         ActiveValue = "1",
                         IsClickable = true
                     },
-                    new DeviceControlElement
+                    new PgTg.Web.DeviceControlElement
                     {
                         ActiveColor = "green",
                         InactiveColor = "gray",
@@ -491,7 +491,7 @@ namespace SPEAmpTunerPlugin.MyModel
                         ActiveValue = "2",
                         IsClickable = true
                     },
-                    new DeviceControlElement
+                    new PgTg.Web.DeviceControlElement
                     {
                         ActiveColor = "green",
                         InactiveColor = "yellow",
@@ -503,7 +503,7 @@ namespace SPEAmpTunerPlugin.MyModel
                         ActiveValue = "1",
                         IsClickable = false
                     },
-                    new DeviceControlElement
+                    new PgTg.Web.DeviceControlElement
                     {
                         ActiveColor = "red",
                         InactiveColor = "gray",
@@ -515,7 +515,7 @@ namespace SPEAmpTunerPlugin.MyModel
                         ActiveValue = "1",
                         IsClickable = true
                     },
-                    new DeviceControlElement
+                    new PgTg.Web.DeviceControlElement
                     {
                         ActiveColor = "orange",
                         InactiveColor = "gray",
@@ -527,7 +527,7 @@ namespace SPEAmpTunerPlugin.MyModel
                         ActiveValue = "L",
                         IsClickable = true
                     },
-                    new DeviceControlElement
+                    new PgTg.Web.DeviceControlElement
                     {
                         ActiveColor = "yellow",
                         InactiveColor = "gray",
@@ -539,7 +539,7 @@ namespace SPEAmpTunerPlugin.MyModel
                         ActiveValue = "M",
                         IsClickable = true
                     },
-                    new DeviceControlElement
+                    new PgTg.Web.DeviceControlElement
                     {
                         ActiveColor = "red",
                         InactiveColor = "gray",

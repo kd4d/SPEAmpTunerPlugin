@@ -2,9 +2,8 @@
 
 using System.Collections.Generic;
 
-// Stubs for IDE / CI builds when the installed PgTgBridge copy does not yet expose these types
-// in referenced assemblies. Remove this file when your PgTgBridge SDK includes Device Control types
-// (or if you get CS0433 duplicate type — then the bridge already provides them).
+// Only used when the installed PgTgBridge assemblies do not include PgTg.Web types.
+// If you see duplicate-type errors with the real bridge, delete this file (see README).
 
 namespace PgTg.Web
 {
