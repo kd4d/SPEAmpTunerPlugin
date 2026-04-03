@@ -16,8 +16,8 @@ PgTgBridge plugin for **SPE Expert** linear amplifiers with integrated ATU. Comm
 ## Serial + emulator smoke test
 
 1. Install a virtual null-modem pair (e.g. **com0com**) so two COM ports are linked (e.g. COM1 ↔ COM2).
-2. Run the emulator on one end:  
-   `dotnet run --project SPEAmpTunerEmulator -- COM2 38400`
+2. Run the emulator on one end (from the repository root):  
+   `dotnet run --project SPEAmpTunerEmulator/SPEAmpTunerEmulator.csproj -- COM2 38400`
 3. Point the plugin at the other port (COM1) in PgTgBridge plugin settings.
 
 The emulator speaks the same framed protocol as `SpeFrameCodec` / `SpeCommandTranslator` (used for development when the official PDF byte layout is mapped into those types).
