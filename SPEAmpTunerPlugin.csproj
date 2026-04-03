@@ -4,6 +4,11 @@
     <InternalsVisibleTo Include="SPEAmpTunerEmulator" />
   </ItemGroup>
 
+  <!-- Emulator lives under the same repo folder; exclude it from this project's default **/*.cs glob. -->
+  <PropertyGroup>
+    <DefaultItemExcludes>$(DefaultItemExcludes);SPEAmpTunerEmulator\**\*</DefaultItemExcludes>
+  </PropertyGroup>
+
   <PropertyGroup>
     <TargetFramework>net10.0</TargetFramework>
     <Nullable>enable</Nullable>

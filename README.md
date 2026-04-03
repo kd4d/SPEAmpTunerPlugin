@@ -9,6 +9,8 @@ PgTgBridge plugin for **SPE Expert** linear amplifiers with integrated ATU. Comm
 
 ## Build
 
+The plugin `.csproj` lives next to the `SPEAmpTunerEmulator` folder; the project file **excludes** that folder so the SDK does not compile emulator sources into the plugin (which would break the build and cause CS0006 / missing `SPEAmpTunerPlugin.dll` for the emulator).
+
 1. Install **PgTgBridge** and ensure `PgTg.dll`, `PgTg.Common.dll`, and `PgTg.Helpers.dll` are available (default hint path: `C:\Program Files\PgTgBridge\bin\`).
 2. If your bridge SDK already ships **Device Control** types under `PgTg.Web`, **delete** `MyModel/Internal/PgTgDeviceControlStubs.cs` to avoid duplicate type definitions.
 3. From the repo root: `dotnet build SPEAmpTunerPlugin.sln`
