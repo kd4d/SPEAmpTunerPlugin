@@ -4,6 +4,7 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.IO.Ports;
+using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 using PgTg.Common;
@@ -11,18 +12,20 @@ using PgTg.Plugins.Core;
 
 namespace SPEAmpTunerPlugin.MyModel.Internal
 {
-    /// <summary>Serial port I/O with SPE binary framing and fictitious string translation.</summary>
+    /// <summary>
+    /// RS-232: sends SPE 6-byte host frames; receives either vendor-framed CSV (0xAA…) or plain CSV lines (emulators).
+    /// </summary>
     internal class SerialConnection : ISpeAmpTunerConnection
     {
         private const string ModuleName = "SerialConnection";
 
         private readonly CancellationToken _cancellationToken;
         private readonly object _lock = new();
-        private readonly List<byte> _rxBuffer = new();
+        private readonly List<byte> _rxBuffer = new(512);
 
         private SerialPort? _serialPort;
         private string _portName = string.Empty;
-        private int _baudRate = 38400;
+        private int _baudRate = SpeProtocol.DefaultBaudRate;
         private bool _isRunning;
         private bool _disposed;
         private bool _sendErrorLogged;
@@ -48,10 +51,10 @@ namespace SPEAmpTunerPlugin.MyModel.Internal
             _cancellationToken = cancellationToken;
         }
 
-        public void Configure(string portName, int baudRate = 38400)
+        public void Configure(string portName, int baudRate = 0)
         {
             _portName = portName;
-            _baudRate = baudRate;
+            _baudRate = baudRate > 0 ? baudRate : SpeProtocol.DefaultBaudRate;
         }
 
         public Task StartAsync()
@@ -69,18 +72,14 @@ namespace SPEAmpTunerPlugin.MyModel.Internal
             Disconnect();
         }
 
-        public bool Send(string data)
+        public bool Send(byte[] data)
         {
-            if (!IsConnected || _serialPort == null)
-                return false;
-
-            byte[]? frame = SpeCommandTranslator.EncodeFictitiousToFrame(data);
-            if (frame == null || frame.Length == 0)
-                return true;
+            if (data == null || data.Length == 0) return false;
+            if (!IsConnected || _serialPort == null) return false;
 
             try
             {
-                _serialPort.Write(frame, 0, frame.Length);
+                _serialPort.Write(data, 0, data.Length);
                 _sendErrorLogged = false;
                 return true;
             }
@@ -109,6 +108,20 @@ namespace SPEAmpTunerPlugin.MyModel.Internal
             }
         }
 
+        public bool Send(string data)
+        {
+            var frames = SpeBinaryCommandEncoder.EncodeAll(data);
+            if (frames.Count == 0)
+                return true;
+
+            foreach (byte[] frame in frames)
+            {
+                if (!Send(frame))
+                    return false;
+            }
+            return true;
+        }
+
         private async Task ConnectAndListenAsync()
         {
             while (_isRunning && !_cancellationToken.IsCancellationRequested)
@@ -125,7 +138,8 @@ namespace SPEAmpTunerPlugin.MyModel.Internal
                             WriteTimeout = 500,
                             Handshake = Handshake.None,
                             DtrEnable = true,
-                            RtsEnable = true
+                            RtsEnable = true,
+                            Encoding = Encoding.UTF8
                         };
                     }
 
@@ -194,20 +208,103 @@ namespace SPEAmpTunerPlugin.MyModel.Internal
                 int read = _serialPort.Read(buf, 0, n);
                 if (read <= 0) return;
 
-                for (int i = 0; i < read; i++)
-                    _rxBuffer.Add(buf[i]);
-
-                while (SpeFrameCodec.TryExtractFrame(_rxBuffer, out byte[]? payload))
+                lock (_rxBuffer)
                 {
-                    string fictitious = SpeCommandTranslator.DecodePayloadToFictitious(payload);
-                    if (fictitious.Length > 0)
-                        DataReceived?.Invoke(fictitious);
+                    for (int i = 0; i < read; i++)
+                        _rxBuffer.Add(buf[i]);
+
+                    DrainReceiveBuffer();
                 }
             }
             catch (Exception ex)
             {
                 Logger.LogError(ModuleName, $"Error reading serial data: {ex.Message}");
             }
+        }
+
+        private void DrainReceiveBuffer()
+        {
+            while (true)
+            {
+                if (TryExtractSpeStatusPacket(_rxBuffer, out string? csvLine))
+                {
+                    DataReceived?.Invoke(csvLine);
+                    continue;
+                }
+
+                if (TryExtractUtf8Line(_rxBuffer, out string? textLine))
+                {
+                    DataReceived?.Invoke(textLine);
+                    continue;
+                }
+
+                break;
+            }
+
+            if (_rxBuffer.Count > 65536)
+            {
+                Logger.LogWarning(ModuleName, "Receive buffer overflow; clearing.");
+                _rxBuffer.Clear();
+            }
+        }
+
+        /// <summary>SPE response: 0xAA×3, len 0x43 (67), 67-byte ASCII CSV, 2-byte checksum, CRLF.</summary>
+        private static bool TryExtractSpeStatusPacket(List<byte> buffer, out string line)
+        {
+            line = string.Empty;
+            const int total = 75;
+            if (buffer.Count < total) return false;
+            if (buffer[0] != 0xAA || buffer[1] != 0xAA || buffer[2] != 0xAA) return false;
+            if (buffer[3] != 0x43) return false;
+
+            var dataSpan = buffer.GetRange(4, 67).ToArray();
+            if (!VerifySpeChecksum(dataSpan, buffer[71], buffer[72]))
+            {
+                buffer.RemoveAt(0);
+                return false;
+            }
+
+            line = Encoding.ASCII.GetString(dataSpan);
+            buffer.RemoveRange(0, total);
+            return true;
+        }
+
+        private static bool VerifySpeChecksum(byte[] data67, byte chk0, byte chk1)
+        {
+            int sum = 0;
+            for (int i = 0; i < data67.Length; i++)
+                sum += data67[i];
+            return chk0 == (byte)(sum % 256) && chk1 == (byte)(sum / 256);
+        }
+
+        private static bool TryExtractUtf8Line(List<byte> buffer, out string line)
+        {
+            line = string.Empty;
+            // Wait for full SPE-framed CSV if binary response is in progress
+            if (buffer.Count > 0 && buffer[0] == 0xAA && buffer.Count < 75)
+                return false;
+
+            int nl = -1;
+            for (int i = 0; i < buffer.Count; i++)
+            {
+                if (buffer[i] == (byte)'\n')
+                {
+                    nl = i;
+                    break;
+                }
+            }
+
+            if (nl < 0) return false;
+
+            int end = nl;
+            if (end > 0 && buffer[end - 1] == (byte)'\r')
+                end--;
+
+            if (end > 0)
+                line = Encoding.UTF8.GetString(buffer.GetRange(0, end).ToArray());
+
+            buffer.RemoveRange(0, nl + 1);
+            return true;
         }
 
         private void Disconnect()
@@ -233,7 +330,11 @@ namespace SPEAmpTunerPlugin.MyModel.Internal
                 catch { }
                 _serialPort = null;
             }
-            _rxBuffer.Clear();
+
+            lock (_rxBuffer)
+            {
+                _rxBuffer.Clear();
+            }
         }
 
         private void SetConnectionState(PluginConnectionState state)

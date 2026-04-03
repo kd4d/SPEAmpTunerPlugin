@@ -11,13 +11,14 @@ using Timer = System.Timers.Timer;
 namespace SPEAmpTunerPlugin.MyModel.Internal
 {
     /// <summary>
-    /// Command polling and priority queue for SPE Expert (fictitious <c>$…;</c> commands only).
+    /// SPE Application Programmer's Guide: polls via <see cref="SpeProtocol.StatusPoll"/>; priority user actions map to 6-byte frames.
     /// </summary>
     internal class CommandQueue : IDisposable
     {
         private const string ModuleName = "CommandQueue";
 
         private readonly ISpeAmpTunerConnection _connection;
+        private readonly StatusTracker _statusTracker;
         private readonly object _priorityLock = new();
 
         private Timer? _pollTimer;
@@ -26,8 +27,7 @@ namespace SPEAmpTunerPlugin.MyModel.Internal
         private CancellationTokenRegistration _timerRegistration;
 
         private string _priorityCommands = string.Empty;
-        private int _rxPollIndex;
-        private int _txPollIndex;
+        private bool _pendingOperateToggle;
         private bool _isPtt;
         private bool _isTuning;
         private bool _waitingForTxAck;
@@ -50,9 +50,10 @@ namespace SPEAmpTunerPlugin.MyModel.Internal
         public bool IsInitialized => _isInitialized;
         public bool SkipDeviceWakeup { get; set; }
 
-        public CommandQueue(ISpeAmpTunerConnection connection, CancellationToken cancellationToken)
+        public CommandQueue(ISpeAmpTunerConnection connection, StatusTracker statusTracker, CancellationToken cancellationToken)
         {
             _connection = connection;
+            _statusTracker = statusTracker;
             _connection.DataReceived += OnDataReceived;
 
             _timerRegistration = cancellationToken.Register(() =>
@@ -105,9 +106,8 @@ namespace SPEAmpTunerPlugin.MyModel.Internal
             _initializationInProgress = true;
             _initCompletionSource = new TaskCompletionSource<bool>();
 
-            string initSequence = Constants.WakeUpCmd + Constants.IdentifyCmd;
-            _connection.Send(initSequence);
-            Logger.LogVerbose(ModuleName, "Sent device initialization sequence, waiting for response");
+            _connection.Send(SpeProtocol.StatusPoll);
+            Logger.LogVerbose(ModuleName, "Sent status poll (init), waiting for CSV response");
 
             _initTimer = new Timer { Interval = InitRetryIntervalMs };
             _initTimer.Elapsed += OnInitTimerElapsed;
@@ -124,44 +124,45 @@ namespace SPEAmpTunerPlugin.MyModel.Internal
                 return;
             }
 
-            _connection.Send(Constants.WakeUpCmd);
+            _connection.Send(SpeProtocol.StatusPoll);
             if (!_initRetryLogged)
             {
-                Logger.LogVerbose(ModuleName, "Resending wake-up command for device initialization");
+                Logger.LogVerbose(ModuleName, "Resending status poll for device initialization");
                 _initRetryLogged = true;
             }
         }
 
-        /// <summary>Initialization completes when a SPE status decode yields a fictitious response containing <c>;</c>.</summary>
+        /// <summary>Initialization completes when a CSV status line is recognized (SPE poll response).</summary>
         public bool OnInitializationResponse(string response)
         {
             if (!_initializationInProgress)
                 return _isInitialized;
 
-            if (response.Contains(';'))
+            bool ok = SpeCsvStatusParser.TryParse(response, out _)
+                || (response.Contains(',') && response.Length >= 12);
+
+            if (!ok)
+                return false;
+
+            if (_initTimer != null)
             {
-                if (_initTimer != null)
-                {
-                    _initTimer.Elapsed -= OnInitTimerElapsed;
-                    _initTimer.Stop();
-                    _initTimer.Dispose();
-                    _initTimer = null;
-                }
-
-                _connection.DataReceived -= OnDataReceived;
-
-                _initializationInProgress = false;
-                _isInitialized = true;
-
-                Logger.LogVerbose(ModuleName, "Device detected, starting normal polling");
-
-                _pollTimer?.Start();
-
-                _initCompletionSource?.TrySetResult(true);
-                return true;
+                _initTimer.Elapsed -= OnInitTimerElapsed;
+                _initTimer.Stop();
+                _initTimer.Dispose();
+                _initTimer = null;
             }
 
-            return false;
+            _connection.DataReceived -= OnDataReceived;
+
+            _initializationInProgress = false;
+            _isInitialized = true;
+
+            Logger.LogVerbose(ModuleName, "Device detected (CSV status), starting normal polling");
+
+            _pollTimer?.Start();
+
+            _initCompletionSource?.TrySetResult(true);
+            return true;
         }
 
         public void Stop()
@@ -173,7 +174,6 @@ namespace SPEAmpTunerPlugin.MyModel.Internal
 
         public void SendPriorityCommand(AmpCommand command, AmpOperateState currentState)
         {
-            string sendNowCommand;
             switch (command)
             {
                 case AmpCommand.RX:
@@ -181,15 +181,13 @@ namespace SPEAmpTunerPlugin.MyModel.Internal
                     _pttInProgress = false;
                     _waitingForTxAck = false;
 
-                    sendNowCommand = Constants.PttOffCmd;
-                    _connection.Send(sendNowCommand);
-                    Logger.LogVerbose(ModuleName, $"Priority RX command sent: {sendNowCommand}");
+                    _connection.Send(Constants.PttOffCmd);
+                    Logger.LogVerbose(ModuleName, "Priority RX: software PTT strings are not sent on SPE serial (use RF PTT)");
                     break;
 
                 case AmpCommand.TX:
                 case AmpCommand.TXforTuneCarrier:
                     _waitingForTxAck = true;
-                    sendNowCommand = Constants.PttOnCmd;
 
                     if (_pollTimer != null && _pollTimer.Interval != _pollingTxMs)
                     {
@@ -198,10 +196,10 @@ namespace SPEAmpTunerPlugin.MyModel.Internal
                         _pollTimer.Start();
                     }
 
-                    _connection.Send(sendNowCommand);
+                    _connection.Send(Constants.PttOnCmd);
                     _pttWatchdogTimer?.Start();
                     _pttInProgress = true;
-                    Logger.LogVerbose(ModuleName, $"Priority TX command sent: {sendNowCommand}");
+                    Logger.LogVerbose(ModuleName, "Priority TX: software PTT strings are not sent on SPE serial (use RF PTT)");
                     break;
             }
         }
@@ -233,20 +231,45 @@ namespace SPEAmpTunerPlugin.MyModel.Internal
 
         public void SetOperateMode(bool operate)
         {
+            var current = _statusTracker.AmpState;
+            if (current == AmpOperateState.Unknown)
+            {
+                Logger.LogVerbose(ModuleName, "SetOperateMode: amp state unknown; ignored until first CSV status");
+                return;
+            }
+
+            bool wantOperate = operate;
+            bool isOperate = current == AmpOperateState.Operate;
+            if (wantOperate == isOperate)
+                return;
+
             lock (_priorityLock)
             {
-                _priorityCommands = operate
-                    ? Constants.ClearFaultCmd + Constants.OperateCmd
-                    : Constants.StandbyCmd;
+                _pendingOperateToggle = true;
             }
-            Logger.LogVerbose(ModuleName, $"Queued {(operate ? "OPERATE" : "STANDBY")} command");
+            Logger.LogVerbose(ModuleName, $"Queued operate toggle (want {(operate ? "OPER" : "STBY")})");
         }
 
-        /// <summary>Sends SPE band selection only (0–10). Frequency is not sent to the amplifier.</summary>
+        /// <summary>Sends band steps via BAND-/BAND+ keys (SPE has no direct band index command).</summary>
         public void SetBandIndex(int bandIndex)
         {
             if (bandIndex < 0 || bandIndex > 10) return;
-            _connection.Send($"$BND {bandIndex};");
+
+            int current = _statusTracker.BandNumber;
+            int delta = bandIndex - current;
+            if (delta == 0) return;
+
+            int steps = Math.Abs(delta);
+            if (delta > 0)
+            {
+                for (int i = 0; i < steps; i++)
+                    _connection.Send(SpeProtocol.CmdBandInc);
+            }
+            else
+            {
+                for (int i = 0; i < steps; i++)
+                    _connection.Send(SpeProtocol.CmdBandDec);
+            }
         }
 
         public void OnTxRxResponseReceived(bool isTx)
@@ -329,19 +352,23 @@ namespace SPEAmpTunerPlugin.MyModel.Internal
         {
             if (!_connection.IsConnected) return;
 
-            string cmdsToSend;
-            bool needsFastPolling = _isPtt || _isTuning || _waitingForTxAck;
-
-            if (needsFastPolling)
+            lock (_priorityLock)
             {
-                cmdsToSend = GetNextPollCommand(true);
-            }
-            else
-            {
-                cmdsToSend = GetNextPollCommand(false);
+                if (_priorityCommands.Length > 0)
+                {
+                    var p = _priorityCommands;
+                    _priorityCommands = string.Empty;
+                    _connection.Send(p);
+                }
             }
 
-            SendCommand(cmdsToSend);
+            if (_pendingOperateToggle)
+            {
+                _pendingOperateToggle = false;
+                _connection.Send(SpeProtocol.CmdOperateToggle);
+            }
+
+            _connection.Send(SpeProtocol.StatusPoll);
         }
 
         private void OnPttWatchdogTimerElapsed(object? sender, ElapsedEventArgs e)
@@ -354,56 +381,8 @@ namespace SPEAmpTunerPlugin.MyModel.Internal
 
             if (_pttInProgress)
             {
-                lock (_priorityLock)
-                {
-                    _priorityCommands = Constants.PttOnCmd;
-                }
+                Logger.LogVerbose(ModuleName, "PTT watchdog: SPE serial does not support software key PTT; relying on RF/hardware PTT");
             }
-        }
-
-        private string GetNextPollCommand(bool isFastPolling)
-        {
-            if (_waitingForTxAck)
-                return string.Empty;
-
-            string command;
-            if (isFastPolling)
-            {
-                command = Constants.TxPollCommands[_txPollIndex];
-                _txPollIndex = (_txPollIndex + 1) % Constants.TxPollCommands.Length;
-            }
-            else
-            {
-                command = Constants.RxPollCommands[_rxPollIndex];
-                _rxPollIndex = (_rxPollIndex + 1) % Constants.RxPollCommands.Length;
-            }
-
-            return command;
-        }
-
-        private void SendCommand(string message)
-        {
-            if (string.IsNullOrEmpty(message) && string.IsNullOrEmpty(_priorityCommands))
-                return;
-
-            string? priorityToSend = null;
-            lock (_priorityLock)
-            {
-                if (_priorityCommands.Length > 0)
-                {
-                    priorityToSend = _priorityCommands;
-                    _priorityCommands = string.Empty;
-                }
-            }
-
-            if (priorityToSend != null)
-            {
-                Logger.LogVerbose(ModuleName, $"Sending priority command: {priorityToSend}");
-                _connection.Send(priorityToSend);
-            }
-
-            if (!string.IsNullOrEmpty(message))
-                _connection.Send(message);
         }
 
         public void Dispose()

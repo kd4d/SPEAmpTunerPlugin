@@ -1,38 +1,24 @@
 using System;
 using System.Collections.Generic;
 using System.IO.Ports;
-using SPEAmpTunerPlugin.MyModel.Internal;
+using System.Text;
 
 namespace SPEAmpTunerEmulator
 {
     /// <summary>
-    /// Minimal SPE frame emulator for loopback testing (com0com / null-modem). Uses the same framing
-    /// and status layout as <see cref="SpeCommandTranslator"/> / <see cref="SpeFrameCodec"/>.
+    /// Minimal SPE serial emulator: finds 6-byte host frames (0x55…0x90 status poll) and replies with CSV lines (same style as kd4d/SPEExpert SpeEmulator).
     /// </summary>
     internal static class Program
     {
-        private static int _power = 100;
-        private static int _swrAtu10 = 12;
-        private static int _swrAnt100 = 115;
-        private static int _temp = 42;
-        private static bool _ptt;
         private static bool _operate = true;
-        private static bool _bypass;
-        private static bool _tuning;
-        private static int _band = 5;
-        private static double _volt = 13.8;
-        private static double _amps = 8.5;
-        private static int _ant = 1;
-        private static int _inp = 1;
-        private static int _fault;
-        private static int _lvl;
+        private static readonly byte[] StatusPoll = { 0x55, 0x55, 0x55, 0x01, 0x90, 0x90 };
 
         private static void Main(string[] args)
         {
             string port = args.Length > 0 ? args[0] : "COM2";
-            int baud = args.Length > 1 && int.TryParse(args[1], out int b) ? b : 38400;
+            int baud = args.Length > 1 && int.TryParse(args[1], out int b) ? b : 9600;
 
-            Console.WriteLine($"SPEAmpTunerEmulator on {port} @ {baud} baud. Ctrl+C to exit.");
+            Console.WriteLine($"SPEAmpTunerEmulator on {port} @ {baud} baud (CSV replies to 0x55/0x90 polls). Ctrl+C to exit.");
             Console.WriteLine("Pair with the plugin (e.g. plugin on COM1, emulator on COM2 with com0com).");
 
             using var serial = new SerialPort(port, baud, Parity.None, 8, StopBits.One)
@@ -58,8 +44,7 @@ namespace SPEAmpTunerEmulator
                         for (int i = 0; i < r; i++)
                             rx.Add(buf[i]);
 
-                        while (SpeFrameCodec.TryExtractFrame(rx, out byte[]? payload))
-                            HandleCommand(serial, payload);
+                        ProcessBuffer(serial, rx);
                     }
                     else
                         System.Threading.Thread.Sleep(5);
@@ -71,84 +56,73 @@ namespace SPEAmpTunerEmulator
             }
         }
 
-        private static void HandleCommand(SerialPort serial, byte[] payload)
+        private static void ProcessBuffer(SerialPort serial, List<byte> rx)
         {
-            if (payload.Length == 0) return;
-
-            byte cmd = payload[0];
-            switch (cmd)
+            while (TryFindPattern(rx, StatusPoll, out int idx))
             {
-                case 0x01:
-                case 0x10:
-                    break;
-                case 0x02 when payload.Length >= 2:
-                    _ant = Math.Clamp((int)payload[1], 1, 4);
-                    break;
-                case 0x03 when payload.Length >= 2:
-                    _inp = Math.Clamp((int)payload[1], 1, 2);
-                    break;
-                case 0x04 when payload.Length >= 2:
-                    _band = Math.Clamp((int)payload[1], 0, 10);
-                    break;
-                case 0x05:
-                    _ptt = true;
-                    break;
-                case 0x06:
-                    _ptt = false;
-                    break;
-                case 0x07:
-                    _operate = false;
-                    break;
-                case 0x08:
-                    _operate = true;
-                    break;
-                case 0x09:
-                    _fault = 0;
-                    break;
-                case 0x0A:
-                    _tuning = true;
-                    break;
-                case 0x0B:
-                    _tuning = false;
-                    break;
-                case 0x0C:
-                    _bypass = true;
-                    break;
-                case 0x0D:
-                    _bypass = false;
-                    break;
-                case 0x0E:
-                    _operate = !_operate;
-                    break;
-                case 0x0F:
-                    _lvl = (_lvl + 1) % 3;
-                    break;
-                case 0x11:
-                    _operate = false;
-                    _ptt = false;
-                    break;
-                default:
-                    break;
+                if (idx > 0)
+                    rx.RemoveRange(0, idx);
+                if (rx.Count < 6)
+                    return;
+
+                rx.RemoveRange(0, 6);
+                var line = BuildCsvLine() + "\r\n";
+                var bytes = Encoding.UTF8.GetBytes(line);
+                serial.Write(bytes, 0, bytes.Length);
             }
 
-            byte[] response = SpeCommandTranslator.BuildFullStatusResponse(
-                _power,
-                _swrAtu10,
-                _swrAnt100,
-                _temp,
-                _ptt,
-                _operate,
-                _bypass,
-                _tuning,
-                _band,
-                _volt,
-                _amps,
-                _ant,
-                _inp,
-                _fault,
-                _lvl);
+            if (rx.Count > 4096)
+                rx.Clear();
+        }
 
-            serial.Write(response, 0, response.Length);
+        private static bool TryFindPattern(List<byte> buffer, byte[] pattern, out int index)
+        {
+            index = -1;
+            if (buffer.Count < pattern.Length)
+                return false;
+
+            for (int i = 0; i <= buffer.Count - pattern.Length; i++)
+            {
+                bool match = true;
+                for (int j = 0; j < pattern.Length; j++)
+                {
+                    if (buffer[i + j] != pattern[j])
+                    {
+                        match = false;
+                        break;
+                    }
+                }
+                if (match)
+                {
+                    index = i;
+                    return true;
+                }
+            }
+            return false;
+        }
+
+        private static string BuildCsvLine()
+        {
+            var fields = new string[22];
+            for (int i = 0; i < 22; i++)
+                fields[i] = "";
+
+            fields[2] = _operate ? "O" : "S";
+            fields[3] = "R";
+            fields[5] = "A";
+            fields[6] = "05";
+            fields[7] = "1";
+            fields[9] = "5";
+            fields[10] = "0";
+            fields[11] = "1.2";
+            fields[12] = "1.2";
+            fields[13] = "48";
+            fields[14] = "5";
+            fields[15] = "40";
+            fields[18] = "N";
+            fields[19] = "N";
+
+            return string.Join(",", fields);
         }
     }
 }

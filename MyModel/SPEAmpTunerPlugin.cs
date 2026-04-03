@@ -98,9 +98,9 @@ namespace SPEAmpTunerPlugin.MyModel
             _connection = serialConnection;
             Logger.LogInfo(ModuleName, $"Using serial connection: {_config.SerialPort} at {_config.BaudRate} baud");
 
-            _commandQueue = new CommandQueue(_connection, _cancellationToken);
             _parser = new ResponseParser();
             _statusTracker = new StatusTracker();
+            _commandQueue = new CommandQueue(_connection, _statusTracker, _cancellationToken);
 
             _commandQueue.Configure(
                 _config.PollingIntervalRxMs,
@@ -300,11 +300,30 @@ namespace SPEAmpTunerPlugin.MyModel
 
         #region Event Handlers
 
+        private static void RefineCsvChangeFlags(ResponseParser.StatusUpdate u, StatusTracker t)
+        {
+            if (u.AmpState.HasValue && u.AmpState.Value != t.AmpState)
+                u.AmpStateChanged = true;
+            if (u.IsPtt.HasValue && u.IsPtt.Value != t.IsPtt)
+                u.PttStateChanged = true;
+            if (u.IsPtt.HasValue && u.IsPtt.Value && !t.IsPtt)
+                u.PttReady = true;
+        }
+
         private void OnDataReceived(string data)
         {
             if (_parser == null || _statusTracker == null || _commandQueue == null) return;
 
-            var update = _parser.Parse(data, _statusTracker);
+            ResponseParser.StatusUpdate update;
+            if (SpeCsvStatusParser.TryParse(data, out SpeCsvParseResult csv))
+            {
+                update = SpeCsvStatusMapper.ToStatusUpdate(csv);
+                RefineCsvChangeFlags(update, _statusTracker);
+            }
+            else
+            {
+                update = _parser.Parse(data, _statusTracker);
+            }
 
             if (update.IsPtt.HasValue)
                 _commandQueue.OnTxRxResponseReceived(update.IsPtt.Value);

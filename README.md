@@ -1,6 +1,14 @@
 # SPEAmpTunerPlugin
 
-PgTgBridge plugin for **SPE Expert** linear amplifiers with integrated ATU. Communicates with the amplifier over **USB serial only** (no TCP/WOL to the SPE). CAT frequency from the radio is **not** sent to the SPE; the plugin derives **HF band (0–10)** from `SetFrequencyKhz` and sends SPE band selection only.
+PgTgBridge plugin for **SPE Expert** linear amplifiers with integrated ATU. Communicates with the amplifier over **USB serial only** (no TCP/WOL to the SPE). CAT frequency from the radio is **not** sent to the SPE; the plugin derives **HF band (0–10)** from `SetFrequencyKhz` and sends SPE **BAND− / BAND+** key frames until the reported band matches.
+
+## Protocol (SPE Application Programmer’s Guide)
+
+- **Host → amplifier:** 6-byte frames with **`0x55 0x55 0x55`** sync (see `SpeProtocol.cs`). Status polling uses command **`0x90`** (`StatusPoll`).
+- **Amplifier → host:** comma-separated **status line** (typically **CRLF**-terminated). Some firmware may wrap the 67-byte CSV in a **`0xAA`**-sync packet; `SerialConnection` accepts both framed and plain CSV lines.
+- **Default baud rate** is **9600** (per SPE documentation); match the amplifier or USB adapter.
+
+Internal **`SpeFrameCodec` / `SpeCommandTranslator`** types remain in the project as reference/emulation helpers; the **live** serial path uses **`SpeProtocol`** + **`SpeCsvStatusParser`**.
 
 ## References
 
@@ -20,15 +28,16 @@ The plugin `.csproj` lives next to the `SPEAmpTunerEmulator` folder; the project
 
 1. Install a virtual null-modem pair (e.g. **com0com**) so two COM ports are linked (e.g. COM1 ↔ COM2).
 2. Run the emulator on one end (from the repository root):  
-   `dotnet run --project SPEAmpTunerEmulator -- COM2 38400`
-3. Point the plugin at the other port (COM1) in PgTgBridge plugin settings.
+   `dotnet run --project SPEAmpTunerEmulator -- COM2 9600`
+3. Point the plugin at the other port (COM1) in PgTgBridge plugin settings (baud **9600** unless you changed it).
 
-The emulator speaks the same framed protocol as `SpeFrameCodec` / `SpeCommandTranslator` (used for development when the official PDF byte layout is mapped into those types).
+The emulator detects **`0x55 0x55 0x55 0x01 0x90 0x90`** status polls and replies with a synthetic **CSV** line (same general shape as [kd4d/SPEExpert](https://github.com/kd4d/SPEExpert) `SpeEmulator`).
 
 ## Limitations (see plan)
 
 - **4 m** band is not implemented.
 - **TCP / WOL** are not used for the SPE.
+- **Software PTT** (`AmpCommand` TX/RX) is not mapped to SPE keyboard frames; use **RF/hardware PTT** as with the vendor stack.
 - **Inductor/cap** relay values are not exposed by SPE; parser reports `0`.
 - **Fan** row is omitted in Device Control (`FanControl = null`).
 

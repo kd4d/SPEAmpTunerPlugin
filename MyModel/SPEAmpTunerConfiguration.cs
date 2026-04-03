@@ -15,7 +15,7 @@ namespace SPEAmpTunerPlugin.MyModel
         public string IpAddress { get; set; } = "127.0.0.1";
         public int Port { get; set; } = 5002;
         public string SerialPort { get; set; } = "COM1";
-        public int BaudRate { get; set; } = 38400;
+        public int BaudRate { get; set; } = 9600;
         public int ReconnectDelayMs { get; set; } = 5000;
         public bool TcpSupported { get; set; } = false;
         public bool SerialSupported { get; set; } = true;
