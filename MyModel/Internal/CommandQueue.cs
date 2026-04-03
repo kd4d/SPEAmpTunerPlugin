@@ -339,11 +339,6 @@ namespace SPEAmpTunerPlugin.MyModel.Internal
             else
             {
                 cmdsToSend = GetNextPollCommand(false);
-                if (_fwVersion == 0.0)
-                {
-                    cmdsToSend = Constants.IdentifyCmd;
-                    Logger.LogVerbose(ModuleName, "Requesting device firmware version");
-                }
             }
 
             SendCommand(cmdsToSend);
